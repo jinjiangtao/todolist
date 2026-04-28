@@ -41,7 +41,10 @@ export default {
     async fetchTodos() {
       try {
         const response = await axios.get('/api/v1/todos');
-        this.todos = response.data.data;
+        this.todos = response.data.data.map(todo => ({
+          ...todo,
+          completed: todo.status === 1
+        }));
       } catch (error) {
         console.error('获取代办事项失败:', error);
       }
@@ -52,9 +55,12 @@ export default {
       try {
         const response = await axios.post('/api/v1/todos', {
           title: this.newTodo,
-          completed: false
+          status: 0
         });
-        this.todos.push(response.data.data);
+        this.todos.push({
+          ...response.data.data,
+          completed: response.data.data.status === 1
+        });
         this.newTodo = '';
       } catch (error) {
         console.error('添加代办事项失败:', error);
@@ -62,7 +68,10 @@ export default {
     },
     async updateTodo(todo) {
       try {
-        await axios.put(`/api/v1/todos/${todo.id}`, todo);
+        await axios.put(`/api/v1/todos/${todo.id}`, {
+          title: todo.title,
+          status: todo.completed ? 1 : 0
+        });
         todo.editing = false;
       } catch (error) {
         console.error('更新代办事项失败:', error);
