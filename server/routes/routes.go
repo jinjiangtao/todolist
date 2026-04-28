@@ -14,6 +14,17 @@ func SetupRoutes(r *gin.Engine) {
 
 	api := r.Group("/api/v1")
 	{
+		// 用户相关路由
+		users := api.Group("/users")
+		{
+			users.POST("", handlers.CreateUser)
+			users.GET("", handlers.GetUsers)
+			users.GET("/:id", handlers.GetUser)
+			users.PUT("/:id", handlers.UpdateUser)
+			users.DELETE("/:id", handlers.DeleteUser)
+		}
+
+		// TODO相关路由
 		todos := api.Group("/todos")
 		{
 			todos.POST("", handlers.CreateTodo)
