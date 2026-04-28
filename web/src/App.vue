@@ -40,8 +40,8 @@ export default {
   methods: {
     async fetchTodos() {
       try {
-        const response = await axios.get('/api/todos');
-        this.todos = response.data;
+        const response = await axios.get('/api/v1/todos');
+        this.todos = response.data.data;
       } catch (error) {
         console.error('获取代办事项失败:', error);
       }
@@ -50,11 +50,11 @@ export default {
       if (this.newTodo.trim() === '') return;
       
       try {
-        const response = await axios.post('/api/todos', {
+        const response = await axios.post('/api/v1/todos', {
           title: this.newTodo,
           completed: false
         });
-        this.todos.push(response.data);
+        this.todos.push(response.data.data);
         this.newTodo = '';
       } catch (error) {
         console.error('添加代办事项失败:', error);
@@ -62,7 +62,7 @@ export default {
     },
     async updateTodo(todo) {
       try {
-        await axios.put(`/api/todos/${todo.id}`, todo);
+        await axios.put(`/api/v1/todos/${todo.id}`, todo);
         todo.editing = false;
       } catch (error) {
         console.error('更新代办事项失败:', error);
@@ -70,7 +70,7 @@ export default {
     },
     async deleteTodo(id) {
       try {
-        await axios.delete(`/api/todos/${id}`);
+        await axios.delete(`/api/v1/todos/${id}`);
         this.todos = this.todos.filter(todo => todo.id !== id);
       } catch (error) {
         console.error('删除代办事项失败:', error);
