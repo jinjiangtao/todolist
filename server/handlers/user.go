@@ -1,10 +1,8 @@
 package handlers
 
 import (
-	"database/sql"
 	"net/http"
 	"strconv"
-	"time"
 	"todo-api/database"
 	"todo-api/models"
 
@@ -12,8 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func CreateTodo(c *gin.Context) {
-	var req models.CreateTodoRequest
+func CreateUser(c *gin.Context) {
+	var req models.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.Response{
 			Code:    400,
@@ -23,28 +21,13 @@ func CreateTodo(c *gin.Context) {
 		return
 	}
 
-	todo := models.Todo{
-		Title:  req.Title,
-		Status: 0,
-		UID:    req.UID,
+	user := models.User{
+		Username: req.Username,
+		Password: req.Password,
+		Bio:      req.Bio,
 	}
 
-	if req.Description != "" {
-		todo.Description = sql.NullString{String: req.Description, Valid: true}
-	}
-
-	if req.Status != nil {
-		todo.Status = *req.Status
-	}
-
-	if req.DueDate != "" {
-		dueDate, err := time.Parse("2006-01-02", req.DueDate)
-		if err == nil {
-			todo.DueDate = sql.NullTime{Time: dueDate, Valid: true}
-		}
-	}
-
-	if err := database.GetDB().Create(&todo).Error; err != nil {
+	if err := database.GetDB().Create(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, models.Response{
 			Code:    500,
 			Message: "创建失败: " + err.Error(),
@@ -56,61 +39,15 @@ func CreateTodo(c *gin.Context) {
 	c.JSON(http.StatusCreated, models.Response{
 		Code:    201,
 		Message: "创建成功",
-		Data:    todo,
+		Data:    user,
 	})
 }
 
-func GetTodos(c *gin.Context) {
-	var query models.QueryTodoRequest
-	if err := c.ShouldBindQuery(&query); err != nil {
-		c.JSON(http.StatusBadRequest, models.Response{
-			Code:    400,
-			Message: "请求参数错误: " + err.Error(),
-			Data:    nil,
-		})
-		return
-	}
-
-	if query.Page < 1 {
-		query.Page = 1
-	}
-	if query.PageSize < 1 || query.PageSize > 100 {
-		query.PageSize = 10
-	}
-
-	// 获取当前用户ID（暂时从请求参数中获取，后续可改为从认证中获取）
-	uidStr := c.Query("uid")
-	if uidStr == "" {
-		c.JSON(http.StatusBadRequest, models.Response{
-			Code:    400,
-			Message: "缺少用户ID",
-			Data:    nil,
-		})
-		return
-	}
-
-	uid, err := strconv.ParseInt(uidStr, 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.Response{
-			Code:    400,
-			Message: "无效的用户ID",
-			Data:    nil,
-		})
-		return
-	}
-
+func GetUsers(c *gin.Context) {
 	db := database.GetDB()
-	var todos []models.Todo
+	var users []models.User
 
-	// 只查询当前用户的TODO事项
-	db = db.Where("uid = ?", uid)
-
-	if query.Status != nil {
-		db = db.Where("status = ?", *query.Status)
-	}
-
-	offset := (query.Page - 1) * query.PageSize
-	if err := db.Offset(offset).Limit(query.PageSize).Order("created_at DESC").Find(&todos).Error; err != nil {
+	if err := db.Find(&users).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, models.Response{
 			Code:    500,
 			Message: "查询失败: " + err.Error(),
@@ -122,11 +59,11 @@ func GetTodos(c *gin.Context) {
 	c.JSON(http.StatusOK, models.Response{
 		Code:    200,
 		Message: "获取成功",
-		Data:    todos,
+		Data:    users,
 	})
 }
 
-func GetTodo(c *gin.Context) {
+func GetUser(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -138,8 +75,8 @@ func GetTodo(c *gin.Context) {
 		return
 	}
 
-	var todo models.Todo
-	if err := database.GetDB().First(&todo, id).Error; err != nil {
+	var user models.User
+	if err := database.GetDB().First(&user, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, models.Response{
 				Code:    404,
@@ -159,11 +96,11 @@ func GetTodo(c *gin.Context) {
 	c.JSON(http.StatusOK, models.Response{
 		Code:    200,
 		Message: "获取成功",
-		Data:    todo,
+		Data:    user,
 	})
 }
 
-func UpdateTodo(c *gin.Context) {
+func UpdateUser(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -175,8 +112,8 @@ func UpdateTodo(c *gin.Context) {
 		return
 	}
 
-	var todo models.Todo
-	if err := database.GetDB().First(&todo, id).Error; err != nil {
+	var user models.User
+	if err := database.GetDB().First(&user, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, models.Response{
 				Code:    404,
@@ -193,7 +130,7 @@ func UpdateTodo(c *gin.Context) {
 		return
 	}
 
-	var req models.UpdateTodoRequest
+	var req models.UpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.Response{
 			Code:    400,
@@ -205,27 +142,18 @@ func UpdateTodo(c *gin.Context) {
 
 	updates := make(map[string]interface{})
 
-	if req.Title != "" {
-		updates["title"] = req.Title
+	if req.Username != "" {
+		updates["username"] = req.Username
 	}
-	if req.Description != "" {
-		updates["description"] = req.Description
+	if req.Password != "" {
+		updates["password"] = req.Password
 	}
-	if req.Status != nil {
-		updates["status"] = *req.Status
-	}
-	if req.DueDate != "" {
-		dueDate, err := time.Parse("2006-01-02", req.DueDate)
-		if err == nil {
-			updates["due_date"] = dueDate
-		}
-	}
-	if req.UID != 0 {
-		updates["uid"] = req.UID
+	if req.Bio != "" {
+		updates["bio"] = req.Bio
 	}
 
 	if len(updates) > 0 {
-		if err := database.GetDB().Model(&todo).Updates(updates).Error; err != nil {
+		if err := database.GetDB().Model(&user).Updates(updates).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, models.Response{
 				Code:    500,
 				Message: "更新失败: " + err.Error(),
@@ -235,16 +163,16 @@ func UpdateTodo(c *gin.Context) {
 		}
 	}
 
-	database.GetDB().First(&todo, id)
+	database.GetDB().First(&user, id)
 
 	c.JSON(http.StatusOK, models.Response{
 		Code:    200,
 		Message: "更新成功",
-		Data:    todo,
+		Data:    user,
 	})
 }
 
-func DeleteTodo(c *gin.Context) {
+func DeleteUser(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -256,7 +184,7 @@ func DeleteTodo(c *gin.Context) {
 		return
 	}
 
-	result := database.GetDB().Delete(&models.Todo{}, id)
+	result := database.GetDB().Delete(&models.User{}, id)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, models.Response{
 			Code:    500,
