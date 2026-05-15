@@ -1,0 +1,12 @@
+﻿Line 1: 测试内容
+Line 2: 中文测试
+Line 3: Go语言
+Line 4: Tail工具
+Line 5: Windows平台
+Line 6: Linux兼容
+Line 7: 实时监控
+Line 8: 多文件支持
+Line 9: 性能优化
+Line 10: 完成测试
+Line 11: 额外行1
+Line 12: 额外行2
