@@ -1,0 +1,10 @@
+Hello World!
+This is a test file.
+Go语言是一门很棒的编程语言。
+Hello Go!
+测试中文搜索功能。
+Hello World Again!
+This line does NOT contain the keyword.
+Go is great!
+中文测试内容。
+End of file.
