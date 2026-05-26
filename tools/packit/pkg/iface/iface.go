@@ -1,7 +1,9 @@
 package iface
 
 import (
-	"github.com/google/gopacket/pcap"
+	"fmt"
+	"net"
+	"strings"
 )
 
 type Interface struct {
@@ -12,25 +14,45 @@ type Interface struct {
 }
 
 func GetAllInterfaces() ([]Interface, error) {
-	devices, err := pcap.FindAllDevs()
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("获取网络接口失败: %w", err)
 	}
 
-	var ifaces []Interface
-	for i, dev := range devices {
+	var result []Interface
+	for i, iface := range ifaces {
 		ip := ""
-		if len(dev.Addresses) > 0 {
-			ip = dev.Addresses[0].IP.String()
+		addrs, err := iface.Addrs()
+		if err == nil && len(addrs) > 0 {
+			for _, addr := range addrs {
+				ipAddr := addr.String()
+				if len(ipAddr) > 0 {
+					idx := strings.Index(ipAddr, "/")
+					if idx > 0 {
+						ip = ipAddr[:idx]
+					} else {
+						ip = ipAddr
+					}
+					if strings.Contains(ip, ".") {
+						break
+					}
+				}
+			}
 		}
-		ifaces = append(ifaces, Interface{
+
+		desc := iface.Name
+		if iface.Flags&net.FlagUp != 0 {
+			desc += " (UP)"
+		}
+
+		result = append(result, Interface{
 			Index: i + 1,
-			Name:  dev.Name,
-			Desc:  dev.Description,
+			Name:  iface.Name,
+			Desc:  desc,
 			IP:    ip,
 		})
 	}
-	return ifaces, nil
+	return result, nil
 }
 
 func GetInterfaceByIndex(index int) (*Interface, error) {
@@ -42,4 +64,17 @@ func GetInterfaceByIndex(index int) (*Interface, error) {
 		return nil, nil
 	}
 	return &ifaces[index-1], nil
+}
+
+func GetInterfaceByName(name string) (*Interface, error) {
+	ifaces, err := GetAllInterfaces()
+	if err != nil {
+		return nil, err
+	}
+	for _, iface := range ifaces {
+		if iface.Name == name {
+			return &iface, nil
+		}
+	}
+	return nil, nil
 }

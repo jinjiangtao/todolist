@@ -60,6 +60,7 @@ func NewStartCommand() *cobra.Command {
 			capturer, err := capture.NewCapturer(selectedIface.Name, options, saveFlag)
 			if err != nil {
 				color.Red("启动抓包失败: %v", err)
+				color.Yellow("提示: 抓包需要以管理员身份运行，请右键点击终端并选择'以管理员身份运行'")
 				return
 			}
 			defer capturer.Close()

@@ -2,10 +2,10 @@ package packet
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net"
-
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
+	"strings"
+	"time"
 )
 
 type PacketInfo struct {
@@ -20,80 +20,182 @@ type PacketInfo struct {
 	Payload      string
 }
 
-func ParsePacket(pkt gopacket.Packet) *PacketInfo {
+type ipHeader struct {
+	Version  uint8
+	IHL      uint8
+	TOS      uint8
+	TotalLen uint16
+	ID       uint16
+	Flags    uint16
+	TTL      uint8
+	Protocol uint8
+	Checksum uint16
+	SrcIP    [4]byte
+	DstIP    [4]byte
+}
+
+type tcpHeader struct {
+	SrcPort   uint16
+	DstPort   uint16
+	Seq       uint32
+	Ack       uint32
+	DataOffset uint8
+	Reserved  uint8
+	Flags     uint16
+	Window    uint16
+	Checksum  uint16
+	UrgPtr    uint16
+}
+
+type udpHeader struct {
+	SrcPort  uint16
+	DstPort  uint16
+	Length   uint16
+	Checksum uint16
+}
+
+type icmpHeader struct {
+	Type     uint8
+	Code     uint8
+	Checksum uint16
+}
+
+func ParseRawPacket(data []byte) *PacketInfo {
 	info := &PacketInfo{}
 
-	if timestamp := pkt.Metadata().Timestamp; !timestamp.IsZero() {
-		info.Timestamp = timestamp.Format("15:04:05.000")
+	info.Timestamp = time.Now().Format("15:04:05.000")
+
+	if len(data) < 20 {
+		return info
 	}
 
-	if netLayer := pkt.NetworkLayer(); netLayer != nil {
-		info.SrcIP = netLayer.NetworkFlow().Src().String()
-		info.DstIP = netLayer.NetworkFlow().Dst().String()
-	}
+	ipHdr := parseIPHeader(data)
+	info.SrcIP = net.IP(ipHdr.SrcIP[:]).String()
+	info.DstIP = net.IP(ipHdr.DstIP[:]).String()
+	info.Length = int(ipHdr.TotalLen)
 
-	if tcpLayer := pkt.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-		tcp := tcpLayer.(*layers.TCP)
-		info.SrcPort = uint16(tcp.SrcPort)
-		info.DstPort = uint16(tcp.DstPort)
+	ipDataOffset := int(ipHdr.IHL * 4)
+	transportData := data[ipDataOffset:]
+
+	switch ipHdr.Protocol {
+	case 6:
 		info.Protocol = "TCP"
-	}
-
-	if udpLayer := pkt.Layer(layers.LayerTypeUDP); udpLayer != nil {
-		udp := udpLayer.(*layers.UDP)
-		info.SrcPort = uint16(udp.SrcPort)
-		info.DstPort = uint16(udp.DstPort)
+		parseTCP(transportData, info)
+	case 17:
 		info.Protocol = "UDP"
-	}
-
-	if icmpLayer := pkt.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
+		parseUDP(transportData, info)
+	case 1:
 		info.Protocol = "ICMP"
-		info.ProtocolType = "IPv4"
-	}
-	if icmp6Layer := pkt.Layer(layers.LayerTypeICMPv6); icmp6Layer != nil {
-		info.Protocol = "ICMP"
-		info.ProtocolType = "IPv6"
+		parseICMP(transportData, info)
+	default:
+		info.Protocol = "OTHER"
 	}
 
-	info.Length = len(pkt.Data())
-
-	if dnsLayer := pkt.Layer(layers.LayerTypeDNS); dnsLayer != nil {
-		info.Protocol = "DNS"
-		dns := dnsLayer.(*layers.DNS)
-		if len(dns.Questions) > 0 {
-			info.Payload = string(dns.Questions[0].Name)
-		}
+	if info.Payload == "" && len(transportData) > 0 {
+		info.Payload = formatPayload(transportData)
 	}
 
-	if payload := pkt.ApplicationLayer(); payload != nil {
-		if info.Protocol == "TCP" {
-			data := payload.Payload()
-			if len(data) > 0 {
-				if data[0] >= 'A' && data[0] <= 'Z' {
-					end := 0
-					for i, b := range data {
-						if b == '\r' || b == '\n' {
-							end = i
-							break
-						}
-					}
-					if end > 0 {
-						info.Payload = string(data[:end])
-					} else if len(data) > 64 {
-						info.Payload = string(data[:64])
-					} else {
-						info.Payload = string(data)
-					}
+	return info
+}
+
+func parseIPHeader(data []byte) ipHeader {
+	hdr := ipHeader{}
+	hdr.Version = (data[0] >> 4) & 0x0F
+	hdr.IHL = data[0] & 0x0F
+	hdr.TOS = data[1]
+	hdr.TotalLen = binary.BigEndian.Uint16(data[2:4])
+	hdr.ID = binary.BigEndian.Uint16(data[4:6])
+	hdr.Flags = binary.BigEndian.Uint16(data[6:8])
+	hdr.TTL = data[8]
+	hdr.Protocol = data[9]
+	hdr.Checksum = binary.BigEndian.Uint16(data[10:12])
+	copy(hdr.SrcIP[:], data[12:16])
+	copy(hdr.DstIP[:], data[16:20])
+	return hdr
+}
+
+func parseTCP(data []byte, info *PacketInfo) {
+	if len(data) < 20 {
+		return
+	}
+
+	tcpHdr := tcpHeader{}
+	tcpHdr.SrcPort = binary.BigEndian.Uint16(data[0:2])
+	tcpHdr.DstPort = binary.BigEndian.Uint16(data[2:4])
+	tcpHdr.Seq = binary.BigEndian.Uint32(data[4:8])
+	tcpHdr.Ack = binary.BigEndian.Uint32(data[8:12])
+	tcpHdr.DataOffset = (data[12] >> 4) & 0x0F
+
+	info.SrcPort = tcpHdr.SrcPort
+	info.DstPort = tcpHdr.DstPort
+
+	dataOffset := int(tcpHdr.DataOffset * 4)
+	if len(data) > dataOffset {
+		payload := data[dataOffset:]
+		info.Payload = formatPayload(payload)
+
+		if tcpHdr.DstPort == 80 || tcpHdr.DstPort == 8080 || tcpHdr.SrcPort == 80 || tcpHdr.SrcPort == 8080 {
+			if len(payload) > 0 && payload[0] >= 'A' && payload[0] <= 'Z' {
+				end := strings.Index(string(payload), "\r\n")
+				if end > 0 {
+					info.Payload = string(payload[:end])
 				}
 			}
 		}
 	}
+}
 
-	if info.Payload == "" && len(pkt.Data()) > 0 {
-		info.Payload = formatPayload(pkt.Data())
+func parseUDP(data []byte, info *PacketInfo) {
+	if len(data) < 8 {
+		return
 	}
 
-	return info
+	udpHdr := udpHeader{}
+	udpHdr.SrcPort = binary.BigEndian.Uint16(data[0:2])
+	udpHdr.DstPort = binary.BigEndian.Uint16(data[2:4])
+	udpHdr.Length = binary.BigEndian.Uint16(data[4:6])
+
+	info.SrcPort = udpHdr.SrcPort
+	info.DstPort = udpHdr.DstPort
+
+	if udpHdr.SrcPort == 53 || udpHdr.DstPort == 53 {
+		info.Protocol = "DNS"
+		if len(data) > 8 {
+			dnsData := data[8:]
+			if len(dnsData) > 12 {
+				qname := parseDNSName(dnsData, 12)
+				if qname != "" {
+					info.Payload = qname
+				}
+			}
+		}
+	} else if len(data) > 8 {
+		payload := data[8:]
+		info.Payload = formatPayload(payload)
+	}
+}
+
+func parseICMP(data []byte, info *PacketInfo) {
+	if len(data) < 4 {
+		return
+	}
+
+	icmpHdr := icmpHeader{}
+	icmpHdr.Type = data[0]
+	icmpHdr.Code = data[1]
+
+	switch icmpHdr.Type {
+	case 0:
+		info.Payload = "Echo Reply"
+	case 8:
+		info.Payload = "Echo Request"
+	case 3:
+		info.Payload = "Destination Unreachable"
+	case 11:
+		info.Payload = "Time Exceeded"
+	default:
+		info.Payload = fmt.Sprintf("Type %d Code %d", icmpHdr.Type, icmpHdr.Code)
+	}
 }
 
 func formatPayload(data []byte) string {
@@ -107,6 +209,37 @@ func formatPayload(data []byte) string {
 		} else {
 			result += "."
 		}
+	}
+	return result
+}
+
+func parseDNSName(data []byte, offset int) string {
+	result := ""
+	currentOffset := offset
+	for {
+		if currentOffset >= len(data) {
+			break
+		}
+		length := int(data[currentOffset])
+		if length == 0 {
+			currentOffset++
+			break
+		}
+		if (length & 0xC0) == 0xC0 {
+			pointerOffset := int(binary.BigEndian.Uint16(data[currentOffset:currentOffset+2]) & 0x3FFF)
+			result += parseDNSName(data, pointerOffset)
+			currentOffset += 2
+			break
+		}
+		currentOffset++
+		if currentOffset+length > len(data) {
+			break
+		}
+		result += string(data[currentOffset : currentOffset+length]) + "."
+		currentOffset += length
+	}
+	if len(result) > 0 && result[len(result)-1] == '.' {
+		result = result[:len(result)-1]
 	}
 	return result
 }
@@ -128,35 +261,4 @@ func IsLocalIP(ipStr string) bool {
 		}
 	}
 	return false
-}
-
-func ParseDNSName(data []byte, offset int) string {
-	result := ""
-	currentOffset := offset
-	for {
-		if currentOffset >= len(data) {
-			break
-		}
-		length := int(data[currentOffset])
-		if length == 0 {
-			currentOffset++
-			break
-		}
-		if (length & 0xC0) == 0xC0 {
-			pointerOffset := int(binary.BigEndian.Uint16(data[currentOffset:currentOffset+2]) & 0x3FFF)
-			result += ParseDNSName(data, pointerOffset)
-			currentOffset += 2
-			break
-		}
-		currentOffset++
-		if currentOffset+length > len(data) {
-			break
-		}
-		result += string(data[currentOffset : currentOffset+length]) + "."
-		currentOffset += length
-	}
-	if len(result) > 0 && result[len(result)-1] == '.' {
-		result = result[:len(result)-1]
-	}
-	return result
 }

@@ -1,15 +1,22 @@
 package capture
 
 import (
-	"os"
-	"strconv"
+	"fmt"
+	"net"
 	"strings"
 	"sync/atomic"
+	"syscall"
+	"unsafe"
 
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/pcap"
-	"github.com/google/gopacket/pcapgo"
 	"packit/pkg/packet"
+)
+
+var (
+	ws2_32     = syscall.MustLoadDLL("ws2_32.dll")
+	procWSAIoctl = ws2_32.MustFindProc("WSAIoctl")
+
+	SIO_RCVALL = 0x98000001
+	RCVALL_ON  uint32 = 1
 )
 
 type FilterOptions struct {
@@ -32,76 +39,101 @@ type Statistics struct {
 }
 
 type Capturer struct {
-	handle      *pcap.Handle
-	pcapWriter  *pcapgo.Writer
-	options     FilterOptions
-	stats       Statistics
-	running     int32
-	outputFile  *os.File
+	socketHandle syscall.Handle
+	options      FilterOptions
+	stats        Statistics
+	running      int32
 }
 
 func NewCapturer(ifaceName string, options FilterOptions, outputFile string) (*Capturer, error) {
-	handle, err := pcap.OpenLive(ifaceName, 65536, true, pcap.BlockForever)
+	sock, err := createRawSocket()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("创建原始套接字失败: %w", err)
 	}
 
-	var writer *pcapgo.Writer
-	var f *os.File
-	if outputFile != "" {
-		f, err = os.Create(outputFile)
-		if err != nil {
-			handle.Close()
-			return nil, err
-		}
-		writer = pcapgo.NewWriter(f)
-		writer.WriteFileHeader(65536, handle.LinkType())
+	if err := setPromiscuousMode(sock); err != nil {
+		syscall.Close(sock)
+		return nil, fmt.Errorf("设置混杂模式失败: %w", err)
+	}
+
+	if err := bindSocketToInterface(sock, ifaceName); err != nil {
+		syscall.Close(sock)
+		return nil, fmt.Errorf("绑定网卡失败: %w", err)
 	}
 
 	return &Capturer{
-		handle:      handle,
-		pcapWriter:  writer,
-		options:     options,
-		running:     1,
-		outputFile:  f,
+		socketHandle: sock,
+		options:      options,
+		running:      1,
 	}, nil
 }
 
+func createRawSocket() (syscall.Handle, error) {
+	return syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_IP)
+}
+
+func setPromiscuousMode(sock syscall.Handle) error {
+	var inBuffer uint32 = RCVALL_ON
+	var bytesReturned uint32
+
+	ret, _, err := procWSAIoctl.Call(
+		uintptr(sock),
+		uintptr(SIO_RCVALL),
+		uintptr(unsafe.Pointer(&inBuffer)),
+		uintptr(4),
+		0,
+		0,
+		uintptr(unsafe.Pointer(&bytesReturned)),
+		0,
+		0,
+	)
+	if ret != 0 {
+		return err
+	}
+	return nil
+}
+
+func bindSocketToInterface(sock syscall.Handle, ifaceName string) error {
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return err
+	}
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return err
+	}
+
+	var ip string
+	for _, addr := range addrs {
+		ipAddr := addr.String()
+		if len(ipAddr) > 0 && ipAddr[0] != ':' {
+			idx := strings.Index(ipAddr, "/")
+			if idx > 0 {
+				ip = ipAddr[:idx]
+			} else {
+				ip = ipAddr
+			}
+			break
+		}
+	}
+
+	if ip == "" {
+		return fmt.Errorf("未找到网卡 %s 的IPv4地址", ifaceName)
+	}
+
+	ipAddr := net.ParseIP(ip).To4()
+	if ipAddr == nil {
+		return fmt.Errorf("无效的IPv4地址: %s", ip)
+	}
+
+	sockAddr := syscall.SockaddrInet4{Port: 0}
+	copy(sockAddr.Addr[:], ipAddr)
+
+	return syscall.Bind(sock, &sockAddr)
+}
+
 func (c *Capturer) ApplyBPFFilter() error {
-	filterParts := []string{}
-
-	if c.options.TCP {
-		filterParts = append(filterParts, "tcp")
-	}
-	if c.options.UDP {
-		filterParts = append(filterParts, "udp")
-	}
-	if c.options.DNS {
-		filterParts = append(filterParts, "udp port 53")
-	}
-	if c.options.HTTP {
-		filterParts = append(filterParts, "(tcp port 80 or tcp port 8080)")
-	}
-
-	if len(c.options.Ports) > 0 {
-		portStrs := []string{}
-		for _, p := range c.options.Ports {
-			portStrs = append(portStrs, strconv.Itoa(int(p)))
-		}
-		filterParts = append(filterParts, "port ("+strings.Join(portStrs, " or ")+")")
-	}
-
-	if c.options.IP != "" {
-		filterParts = append(filterParts, "host "+c.options.IP)
-	}
-
-	if len(filterParts) > 0 {
-		filter := strings.Join(filterParts, " and ")
-		if err := c.handle.SetBPFFilter(filter); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -142,23 +174,25 @@ func (c *Capturer) shouldFilter(info *packet.PacketInfo) bool {
 }
 
 func (c *Capturer) Capture(callback func(*packet.PacketInfo)) error {
-	packetSource := gopacket.NewPacketSource(c.handle, c.handle.LinkType())
-	for pkt := range packetSource.Packets() {
-		if atomic.LoadInt32(&c.running) == 0 {
-			break
-		}
+	buf := make([]byte, 65536)
 
-		info := packet.ParsePacket(pkt)
-		if info.Protocol == "" {
+	for atomic.LoadInt32(&c.running) == 1 {
+		n, _, err := syscall.Recvfrom(c.socketHandle, buf, 0)
+		if err != nil || n == 0 {
 			continue
 		}
 
-		if c.shouldFilter(info) {
+		pkt := packet.ParseRawPacket(buf[:n])
+		if pkt.Protocol == "" {
+			continue
+		}
+
+		if c.shouldFilter(pkt) {
 			continue
 		}
 
 		atomic.AddUint64(&c.stats.TotalPackets, 1)
-		switch info.Protocol {
+		switch pkt.Protocol {
 		case "TCP":
 			atomic.AddUint64(&c.stats.TCP, 1)
 		case "UDP":
@@ -173,12 +207,9 @@ func (c *Capturer) Capture(callback func(*packet.PacketInfo)) error {
 			atomic.AddUint64(&c.stats.Other, 1)
 		}
 
-		if c.pcapWriter != nil {
-			c.pcapWriter.WritePacket(pkt.Metadata().CaptureInfo, pkt.Data())
-		}
-
-		callback(info)
+		callback(pkt)
 	}
+
 	return nil
 }
 
@@ -187,10 +218,7 @@ func (c *Capturer) Stop() {
 }
 
 func (c *Capturer) Close() {
-	c.handle.Close()
-	if c.outputFile != nil {
-		c.outputFile.Close()
-	}
+	syscall.Close(c.socketHandle)
 }
 
 func (c *Capturer) GetStats() Statistics {
