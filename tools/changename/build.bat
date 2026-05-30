@@ -4,14 +4,18 @@ echo  Smart Renamer - 构建脚本
 echo ========================================
 echo.
 
-echo [1/1] 编译 Go 程序...
+echo [1/2] 下载依赖...
 go mod tidy
 if errorlevel 1 (
-    echo 依赖安装失败！
+    echo 依赖下载失败！
     pause
     exit /b 1
 )
+echo 依赖下载成功！
+echo.
 
+echo [2/2] 编译 Go 程序...
+if not exist build mkdir build
 go build -ldflags "-s -w" -o build\smart-renamer.exe
 if errorlevel 1 (
     echo 编译失败！

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,14 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/data/binding"
-	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/storage"
-	"fyne.io/fyne/v2/theme"
-	"fyne.io/fyne/v2/widget"
 	"github.com/google/uuid"
 )
 
@@ -44,13 +37,13 @@ type Rule struct {
 		UseRegex bool
 	}
 	Date struct {
-		Source    string // "modified"
-		Format    string // "YYYYMMDD", "YYYY-MM-DD" etc
-		Position  string // "prefix", "suffix"
+		Source    string
+		Format    string
+		Position  string
 		Separator string
 	}
 	Case struct {
-		Mode string // "upper", "lower", "title", "camel"
+		Mode string
 	}
 	Extension struct {
 		NewExt    string
@@ -59,38 +52,67 @@ type Rule struct {
 	}
 }
 
-type AppState struct {
-	files       []FileInfo
-	rules       []Rule
-	undoRecords map[string][]UndoItem
-	mu          sync.Mutex
-}
-
 type UndoItem struct {
 	OldPath string
 	NewPath string
 }
 
+var (
+	files       []FileInfo
+	rules       []Rule
+	undoRecords map[string][]UndoItem
+	reader      = bufio.NewReader(os.Stdin)
+)
+
 func main() {
-	a := app.New()
-	a.Settings().SetTheme(theme.DefaultTheme())
-	w := a.NewWindow("智能文件批量重命名工具 - Smart Renamer")
-	w.Resize(fyne.NewSize(1200, 800))
+	rules = createDefaultRules()
+	undoRecords = make(map[string][]UndoItem)
 
-	state := &AppState{
-		files:       []FileInfo{},
-		rules:       createDefaultRules(),
-		undoRecords: make(map[string][]UndoItem),
+	println("========================================")
+	println("  智能文件批量重命名工具 - Smart Renamer")
+	println("========================================")
+
+	for {
+		println("\n请选择操作:")
+		println("1. 选择文件夹")
+		println("2. 配置重命名规则")
+		println("3. 预览重命名结果")
+		println("4. 执行重命名")
+		println("5. 撤销上次操作")
+		println("6. 退出")
+		print("请输入选项 (1-6): ")
+
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+
+		switch input {
+		case "1":
+			selectFolder()
+		case "2":
+			configRules()
+		case "3":
+			previewRename()
+		case "4":
+			executeRename()
+		case "5":
+			undoRename()
+		case "6":
+			println("再见！")
+			return
+		default:
+			println("无效选项，请重试。")
+		}
 	}
-
-	ui := createUI(w, state)
-	w.SetContent(ui)
-	w.ShowAndRun()
 }
 
 func createDefaultRules() []Rule {
 	return []Rule{
-		{Type: "sequence", Enabled: false},
+		{Type: "sequence", Enabled: false, Sequence: struct {
+			Start  int
+			Digits int
+			Prefix string
+			Suffix string
+		}{Start: 1, Digits: 3}},
 		{Type: "replace", Enabled: false},
 		{Type: "date", Enabled: false, Date: struct {
 			Source    string
@@ -103,290 +125,26 @@ func createDefaultRules() []Rule {
 	}
 }
 
-func createUI(w fyne.Window, state *AppState) fyne.CanvasObject {
-	// 左侧面板 - 规则配置
-	rulePanel := createRulePanel(state, w)
-	
-	// 右侧面板 - 文件列表和操作
-	filePanel := createFilePanel(state, w)
-	
-	// 主布局
-	split := container.NewHSplit(rulePanel, filePanel)
-	split.Offset = 0.35
-	
-	return split
-}
+func selectFolder() {
+	print("\n请输入文件夹路径: ")
+	path, _ := reader.ReadString('\n')
+	path = strings.TrimSpace(path)
+	path = strings.Trim(path, "\"")
 
-func createRulePanel(state *AppState, w fyne.Window) fyne.CanvasObject {
-	content := container.NewVBox()
-	
-	header := widget.NewLabelWithStyle("重命名规则", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	content.Add(header)
-	content.Add(widget.NewSeparator())
-	
-	ruleTypes := map[string]string{
-		"sequence":    "序号填充",
-		"replace":     "查找替换",
-		"date":        "日期标记",
-		"case":        "大小写转换",
-		"extension":   "扩展名修改",
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		println("错误: 文件夹不存在")
+		return
 	}
-	
-	for i := range state.rules {
-		rule := &state.rules[i]
-		name := ruleTypes[rule.Type]
-		
-		ruleCard := createRuleCard(rule, name, state, w)
-		content.Add(ruleCard)
-		content.Add(widget.NewSeparator())
-	}
-	
-	return container.NewScroll(content)
+
+	scanFiles(path)
+	println(fmt.Sprintf("成功加载 %d 个文件", len(files)))
 }
 
-func createRuleCard(rule *Rule, name string, state *AppState, w fyne.Window) fyne.CanvasObject {
-	check := widget.NewCheck(name, func(checked bool) {
-		rule.Enabled = checked
-		updatePreview(state)
-	})
-	check.SetChecked(rule.Enabled)
-	
-	content := container.NewVBox()
-	
-	switch rule.Type {
-	case "sequence":
-		startEntry := widget.NewEntry()
-		startEntry.SetText(fmt.Sprintf("%d", rule.Sequence.Start))
-		startEntry.SetPlaceHolder("起始数字")
-		startEntry.OnChanged = func(s string) {
-			if val, err := strconv.Atoi(s); err == nil {
-				rule.Sequence.Start = val
-				updatePreview(state)
-			}
-		}
-		
-		digitsEntry := widget.NewEntry()
-		digitsEntry.SetText(fmt.Sprintf("%d", rule.Sequence.Digits))
-		digitsEntry.SetPlaceHolder("位数")
-		digitsEntry.OnChanged = func(s string) {
-			if val, err := strconv.Atoi(s); err == nil {
-				rule.Sequence.Digits = val
-				updatePreview(state)
-			}
-		}
-		
-		prefixEntry := widget.NewEntry()
-		prefixEntry.SetText(rule.Sequence.Prefix)
-		prefixEntry.SetPlaceHolder("前缀")
-		prefixEntry.OnChanged = func(s string) {
-			rule.Sequence.Prefix = s
-			updatePreview(state)
-		}
-		
-		suffixEntry := widget.NewEntry()
-		suffixEntry.SetText(rule.Sequence.Suffix)
-		suffixEntry.SetPlaceHolder("后缀")
-		suffixEntry.OnChanged = func(s string) {
-			rule.Sequence.Suffix = s
-			updatePreview(state)
-		}
-		
-		content.Add(widget.NewLabel("起始数字:"))
-		content.Add(startEntry)
-		content.Add(widget.NewLabel("位数:"))
-		content.Add(digitsEntry)
-		content.Add(widget.NewLabel("前缀:"))
-		content.Add(prefixEntry)
-		content.Add(widget.NewLabel("后缀:"))
-		content.Add(suffixEntry)
-		
-	case "replace":
-		searchEntry := widget.NewEntry()
-		searchEntry.SetText(rule.Replace.Search)
-		searchEntry.SetPlaceHolder("查找内容")
-		searchEntry.OnChanged = func(s string) {
-			rule.Replace.Search = s
-			updatePreview(state)
-		}
-		
-		replaceEntry := widget.NewEntry()
-		replaceEntry.SetText(rule.Replace.Replace)
-		replaceEntry.SetPlaceHolder("替换为")
-		replaceEntry.OnChanged = func(s string) {
-			rule.Replace.Replace = s
-			updatePreview(state)
-		}
-		
-		regexCheck := widget.NewCheck("使用正则表达式", func(checked bool) {
-			rule.Replace.UseRegex = checked
-			updatePreview(state)
-		})
-		regexCheck.SetChecked(rule.Replace.UseRegex)
-		
-		content.Add(widget.NewLabel("查找内容:"))
-		content.Add(searchEntry)
-		content.Add(widget.NewLabel("替换为:"))
-		content.Add(replaceEntry)
-		content.Add(regexCheck)
-		
-	case "date":
-		formatSelect := widget.NewSelect([]string{"YYYYMMDD", "YYYY-MM-DD", "YYYY_MM_DD", "YYYYMMDD_HHMMSS"}, func(s string) {
-			rule.Date.Format = s
-			updatePreview(state)
-		})
-		formatSelect.SetSelected(rule.Date.Format)
-		
-		positionSelect := widget.NewSelect([]string{"prefix", "suffix"}, func(s string) {
-			rule.Date.Position = s
-			updatePreview(state)
-		})
-		positionSelect.SetSelected(rule.Date.Position)
-		
-		sepEntry := widget.NewEntry()
-		sepEntry.SetText(rule.Date.Separator)
-		sepEntry.SetPlaceHolder("分隔符")
-		sepEntry.OnChanged = func(s string) {
-			rule.Date.Separator = s
-			updatePreview(state)
-		}
-		
-		content.Add(widget.NewLabel("日期格式:"))
-		content.Add(formatSelect)
-		content.Add(widget.NewLabel("位置:"))
-		content.Add(positionSelect)
-		content.Add(widget.NewLabel("分隔符:"))
-		content.Add(sepEntry)
-		
-	case "case":
-		caseSelect := widget.NewSelect([]string{"upper", "lower", "title", "camel"}, func(s string) {
-			rule.Case.Mode = s
-			updatePreview(state)
-		})
-		caseSelect.SetSelected(rule.Case.Mode)
-		
-		content.Add(widget.NewLabel("转换方式:"))
-		content.Add(caseSelect)
-		
-	case "extension":
-		extEntry := widget.NewEntry()
-		extEntry.SetText(rule.Extension.NewExt)
-		extEntry.SetPlaceHolder("新扩展名 (留空不修改)")
-		extEntry.OnChanged = func(s string) {
-			rule.Extension.NewExt = s
-			updatePreview(state)
-		}
-		
-		unifyCheck := widget.NewCheck("统一扩展名大小写", func(checked bool) {
-			rule.Extension.UnifyCase = checked
-			updatePreview(state)
-		})
-		unifyCheck.SetChecked(rule.Extension.UnifyCase)
-		
-		targetCaseSelect := widget.NewSelect([]string{"lower", "upper"}, func(s string) {
-			rule.Extension.TargetCase = s
-			updatePreview(state)
-		})
-		targetCaseSelect.SetSelected("lower")
-		
-		content.Add(widget.NewLabel("新扩展名:"))
-		content.Add(extEntry)
-		content.Add(unifyCheck)
-		content.Add(widget.NewLabel("目标格式:"))
-		content.Add(targetCaseSelect)
-	}
-	
-	form := container.NewVBox(check)
-	ruleContent := container.NewVBox(content...)
-	ruleContent.Hide()
-	
-	check.OnChanged = func(checked bool) {
-		rule.Enabled = checked
-		if checked {
-			ruleContent.Show()
-		} else {
-			ruleContent.Hide()
-		}
-		updatePreview(state)
-	}
-	
-	return container.NewVBox(form, ruleContent)
-}
-
-func createFilePanel(state *AppState, w fyne.Window) fyne.CanvasObject {
-	// 顶部工具栏
-	toolbar := container.NewBorder(nil, nil, nil, nil, container.NewHBox(
-		widget.NewButtonWithIcon("选择文件夹", theme.FolderOpenIcon(), func() {
-			openFolderDialog(state, w)
-		}),
-		widget.NewButton("刷新预览", func() {
-			updatePreview(state)
-		}),
-	))
-	
-	// 文件列表
-	list := widget.NewTable(
-		func() (int, int) {
-			return len(state.files), 3
-		},
-		func() fyne.CanvasObject {
-			return widget.NewLabel("")
-		},
-		func(id widget.TableCellID, cell fyne.CanvasObject) {
-			label := cell.(*widget.Label)
-			if id.Row < len(state.files) {
-				file := state.files[id.Row]
-				switch id.Col {
-				case 0:
-					label.SetText(file.Name + file.Ext)
-				case 1:
-					label.SetText("→")
-				case 2:
-					if file.NewName != "" && file.NewName != file.Name+file.Ext {
-						label.SetText(file.NewName)
-					} else {
-						label.SetText("-")
-					}
-				}
-			}
-		},
-	)
-	list.SetColumnWidth(0, 300)
-	list.SetColumnWidth(1, 30)
-	list.SetColumnWidth(2, 300)
-	
-	// 底部操作栏
-	statusLabel := widget.NewLabel("就绪")
-	
-	undoBtn := widget.NewButtonWithIcon("撤销", theme.MediaReplayIcon(), func() {
-		showUndoDialog(state, w)
-	})
-	undoBtn.Disable()
-	
-	executeBtn := widget.NewButtonWithIcon("开始重命名", theme.ConfirmIcon(), func() {
-		executeRename(state, w, statusLabel, undoBtn)
-	})
-	executeBtn.Importance = widget.HighImportance
-	
-	bottom := container.NewBorder(nil, nil, nil, container.NewHBox(undoBtn, executeBtn), statusLabel)
-	
-	return container.NewBorder(toolbar, bottom, nil, nil, list)
-}
-
-func openFolderDialog(state *AppState, w fyne.Window) {
-	dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
-		if err != nil || uri == nil {
-			return
-		}
-		
-		path := uri.Path()
-		scanFiles(path, state, w)
-	}, w)
-}
-
-func scanFiles(path string, state *AppState, w fyne.Window) {
-	var files []FileInfo
+func scanFiles(path string) {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+
+	files = nil
 
 	err := filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -422,21 +180,348 @@ func scanFiles(path string, state *AppState, w fyne.Window) {
 	wg.Wait()
 
 	if err != nil {
-		dialog.ShowError(err, w)
+		println("扫描文件夹时出错:", err.Error())
 		return
 	}
 
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].Name+files[i].Ext < files[j].Name+files[j].Ext
 	})
-
-	state.files = files
-	updatePreview(state)
 }
 
-func updatePreview(state *AppState) {
-	for i := range state.files {
-		state.files[i].NewName = applyRules(state.files[i], state.rules, i)
+func configRules() {
+	for {
+		println("\n当前规则状态:")
+		for i, rule := range rules {
+			status := "关闭"
+			if rule.Enabled {
+				status = "开启"
+			}
+			ruleName := getRuleName(rule.Type)
+			println(fmt.Sprintf("%d. %s [%s]", i+1, ruleName, status))
+		}
+		println("0. 返回主菜单")
+		print("请选择要配置的规则 (0-5): ")
+
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		
+		if input == "0" {
+			return
+		}
+
+		idx, err := strconv.Atoi(input)
+		if err != nil || idx < 1 || idx > 5 {
+			println("无效选项")
+			continue
+		}
+
+		configRule(idx - 1)
+	}
+}
+
+func getRuleName(t string) string {
+	switch t {
+	case "sequence":
+		return "序号填充"
+	case "replace":
+		return "查找替换"
+	case "date":
+		return "日期标记"
+	case "case":
+		return "大小写转换"
+	case "extension":
+		return "扩展名修改"
+	default:
+		return t
+	}
+}
+
+func configRule(idx int) {
+	rule := &rules[idx]
+	
+	println(fmt.Sprintf("\n配置规则: %s", getRuleName(rule.Type)))
+	print("是否启用该规则? (y/n): ")
+	ans, _ := reader.ReadString('\n')
+	rule.Enabled = strings.ToLower(strings.TrimSpace(ans)) == "y"
+
+	if !rule.Enabled {
+		return
+	}
+
+	switch rule.Type {
+	case "sequence":
+		print("起始数字 (默认 1): ")
+		input, _ := reader.ReadString('\n')
+		if v, err := strconv.Atoi(strings.TrimSpace(input)); err == nil {
+			rule.Sequence.Start = v
+		}
+
+		print("位数 (默认 3): ")
+		input, _ = reader.ReadString('\n')
+		if v, err := strconv.Atoi(strings.TrimSpace(input)); err == nil {
+			rule.Sequence.Digits = v
+		}
+
+		print("前缀 (默认空): ")
+		input, _ = reader.ReadString('\n')
+		rule.Sequence.Prefix = strings.TrimSpace(input)
+
+		print("后缀 (默认空): ")
+		input, _ = reader.ReadString('\n')
+		rule.Sequence.Suffix = strings.TrimSpace(input)
+
+	case "replace":
+		print("查找内容: ")
+		input, _ := reader.ReadString('\n')
+		rule.Replace.Search = strings.TrimSpace(input)
+
+		print("替换为: ")
+		input, _ = reader.ReadString('\n')
+		rule.Replace.Replace = strings.TrimSpace(input)
+
+		print("使用正则表达式? (y/n): ")
+		input, _ = reader.ReadString('\n')
+		rule.Replace.UseRegex = strings.ToLower(strings.TrimSpace(input)) == "y"
+
+	case "date":
+		println("日期格式:")
+		println("1. YYYYMMDD")
+		println("2. YYYY-MM-DD")
+		println("3. YYYY_MM_DD")
+		println("4. YYYYMMDD_HHMMSS")
+		print("请选择格式 (1-4): ")
+		input, _ := reader.ReadString('\n')
+		switch strings.TrimSpace(input) {
+		case "1":
+			rule.Date.Format = "YYYYMMDD"
+		case "2":
+			rule.Date.Format = "YYYY-MM-DD"
+		case "3":
+			rule.Date.Format = "YYYY_MM_DD"
+		case "4":
+			rule.Date.Format = "YYYYMMDD_HHMMSS"
+		}
+
+		print("位置 (prefix/suffix, 默认 prefix): ")
+		input, _ = reader.ReadString('\n')
+		rule.Date.Position = strings.TrimSpace(input)
+		if rule.Date.Position != "prefix" && rule.Date.Position != "suffix" {
+			rule.Date.Position = "prefix"
+		}
+
+		print("分隔符 (默认 _): ")
+		input, _ = reader.ReadString('\n')
+		rule.Date.Separator = strings.TrimSpace(input)
+		if rule.Date.Separator == "" {
+			rule.Date.Separator = "_"
+		}
+
+	case "case":
+		println("转换方式:")
+		println("1. upper (全大写)")
+		println("2. lower (全小写)")
+		println("3. title (首字母大写)")
+		println("4. camel (驼峰式)")
+		print("请选择 (1-4): ")
+		input, _ := reader.ReadString('\n')
+		switch strings.TrimSpace(input) {
+		case "1":
+			rule.Case.Mode = "upper"
+		case "2":
+			rule.Case.Mode = "lower"
+		case "3":
+			rule.Case.Mode = "title"
+		case "4":
+			rule.Case.Mode = "camel"
+		}
+
+	case "extension":
+		print("新扩展名 (留空不修改): ")
+		input, _ := reader.ReadString('\n')
+		rule.Extension.NewExt = strings.TrimSpace(input)
+
+		print("统一扩展名大小写? (y/n): ")
+		input, _ = reader.ReadString('\n')
+		rule.Extension.UnifyCase = strings.ToLower(strings.TrimSpace(input)) == "y"
+
+		if rule.Extension.UnifyCase {
+			print("目标格式 (lower/upper, 默认 lower): ")
+			input, _ = reader.ReadString('\n')
+			rule.Extension.TargetCase = strings.TrimSpace(input)
+			if rule.Extension.TargetCase != "lower" && rule.Extension.TargetCase != "upper" {
+				rule.Extension.TargetCase = "lower"
+			}
+		}
+	}
+
+	println("规则配置完成")
+}
+
+func previewRename() {
+	if len(files) == 0 {
+		println("请先选择文件夹")
+		return
+	}
+
+	enabledCount := 0
+	for _, rule := range rules {
+		if rule.Enabled {
+			enabledCount++
+		}
+	}
+
+	if enabledCount == 0 {
+		println("请先配置并启用至少一个重命名规则")
+		return
+	}
+
+	for i := range files {
+		files[i].NewName = applyRules(files[i], rules, i)
+	}
+
+	println("\n预览结果:")
+	println("----------------------------------------------------------------------")
+	println(fmt.Sprintf("%-30s %-30s %-10s", "原文件名", "新文件名", "状态"))
+	println("----------------------------------------------------------------------")
+
+	conflictCount := 0
+	for _, file := range files {
+		status := "不变"
+		if file.NewName != file.Name+file.Ext {
+			status = "重命名"
+		}
+		println(fmt.Sprintf("%-30s %-30s %-10s", 
+			truncate(file.Name+file.Ext, 28), 
+			truncate(file.NewName, 28), 
+			status))
+	}
+
+	println("----------------------------------------------------------------------")
+	println(fmt.Sprintf("共 %d 个文件，其中 %d 个将被重命名", 
+		len(files), countToRename()))
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}
+
+func countToRename() int {
+	count := 0
+	for _, file := range files {
+		if file.NewName != "" && file.NewName != file.Name+file.Ext {
+			count++
+		}
+	}
+	return count
+}
+
+func executeRename() {
+	if len(files) == 0 {
+		println("请先选择文件夹")
+		return
+	}
+
+	if countToRename() == 0 {
+		println("没有文件需要重命名")
+		return
+	}
+
+	print("\n确定要执行重命名吗? (y/n): ")
+	ans, _ := reader.ReadString('\n')
+	if strings.ToLower(strings.TrimSpace(ans)) != "y" {
+		println("操作取消")
+		return
+	}
+
+	var undoItems []UndoItem
+	renamed := 0
+	skipped := 0
+
+	processedPaths := make(map[string]bool)
+
+	for _, file := range files {
+		oldPath := file.Path
+		newName := file.NewName
+		if newName == "" || newName == file.Name+file.Ext {
+			continue
+		}
+
+		newPath := filepath.Join(filepath.Dir(oldPath), newName)
+		
+		finalPath := newPath
+		counter := 1
+		for (fileExists(finalPath) && oldPath != finalPath) || processedPaths[finalPath] {
+			ext := filepath.Ext(finalPath)
+			base := finalPath[:len(finalPath)-len(ext)]
+			finalPath = fmt.Sprintf("%s_%d%s", base, counter, ext)
+			counter++
+		}
+
+		if err := os.Rename(oldPath, finalPath); err != nil {
+			println(fmt.Sprintf("重命名失败: %s -> %s, 错误: %s", 
+				file.Name+file.Ext, newName, err.Error()))
+			skipped++
+			continue
+		}
+
+		undoItems = append(undoItems, UndoItem{
+			OldPath: finalPath,
+			NewPath: oldPath,
+		})
+		processedPaths[finalPath] = true
+		renamed++
+	}
+
+	if len(undoItems) > 0 {
+		undoID := uuid.New().String()
+		undoRecords[undoID] = undoItems
+	}
+
+	println(fmt.Sprintf("完成! 重命名 %d 个文件，跳过 %d 个", renamed, skipped))
+	
+	if len(files) > 0 {
+		scanFiles(filepath.Dir(files[0].Path))
+	}
+}
+
+func undoRename() {
+	var undoID string
+	var items []UndoItem
+	
+	for id, u := range undoRecords {
+		undoID = id
+		items = u
+		break
+	}
+	
+	if len(items) == 0 {
+		println("没有可撤销的操作")
+		return
+	}
+
+	print(fmt.Sprintf("确定要撤销上次对 %d 个文件的重命名操作吗? (y/n): ", len(items)))
+	ans, _ := reader.ReadString('\n')
+	if strings.ToLower(strings.TrimSpace(ans)) != "y" {
+		println("操作取消")
+		return
+	}
+
+	restored := 0
+	for _, item := range items {
+		if err := os.Rename(item.OldPath, item.NewPath); err == nil {
+			restored++
+		}
+	}
+
+	delete(undoRecords, undoID)
+	println(fmt.Sprintf("完成! 成功恢复 %d 个文件", restored))
+	
+	if len(files) > 0 {
+		scanFiles(filepath.Dir(files[0].Path))
 	}
 }
 
@@ -554,108 +639,6 @@ func applyExtensionChange(ext string, rule struct {
 	}
 
 	return ext
-}
-
-func executeRename(state *AppState, w fyne.Window, status *widget.Label, undoBtn *widget.Button) {
-	if len(state.files) == 0 {
-		dialog.ShowInformation("提示", "请先选择文件夹", w)
-		return
-	}
-
-	confirm := dialog.NewConfirm("确认重命名", "确定要重命名这些文件吗？", func(ok bool) {
-		if !ok {
-			return
-		}
-
-		var undoItems []UndoItem
-		renamed := 0
-		skipped := 0
-
-		processedPaths := make(map[string]bool)
-
-		for _, file := range state.files {
-			oldPath := file.Path
-			newName := file.NewName
-			if newName == "" || newName == file.Name+file.Ext {
-				continue
-			}
-
-			newPath := filepath.Join(filepath.Dir(oldPath), newName)
-			
-			finalPath := newPath
-			counter := 1
-			for (fileExists(finalPath) && oldPath != finalPath) || processedPaths[finalPath] {
-				ext := filepath.Ext(finalPath)
-				base := finalPath[:len(finalPath)-len(ext)]
-				finalPath = fmt.Sprintf("%s_%d%s", base, counter, ext)
-				counter++
-			}
-
-			if err := os.Rename(oldPath, finalPath); err != nil {
-				skipped++
-				continue
-			}
-
-			undoItems = append(undoItems, UndoItem{
-				OldPath: finalPath,
-				NewPath: oldPath,
-			})
-			processedPaths[finalPath] = true
-			renamed++
-		}
-
-		if len(undoItems) > 0 {
-			undoID := uuid.New().String()
-			state.undoRecords[undoID] = undoItems
-			undoBtn.Enable()
-		}
-
-		status.SetText(fmt.Sprintf("已重命名 %d 个文件，跳过 %d 个", renamed, skipped))
-		
-		// 重新扫描
-		if len(state.files) > 0 {
-			scanFiles(filepath.Dir(state.files[0].Path), state, w)
-		}
-	}, w)
-	confirm.Show()
-}
-
-func showUndoDialog(state *AppState, w fyne.Window) {
-	var undoID string
-	var items []UndoItem
-	
-	for id, u := range state.undoRecords {
-		undoID = id
-		items = u
-		break
-	}
-	
-	if len(items) == 0 {
-		dialog.ShowInformation("提示", "没有可撤销的操作", w)
-		return
-	}
-
-	confirm := dialog.NewConfirm("撤销操作", fmt.Sprintf("确定要撤销上次对 %d 个文件的重命名操作吗？", len(items)), func(ok bool) {
-		if !ok {
-			return
-		}
-		
-		restored := 0
-		for _, item := range items {
-			if err := os.Rename(item.OldPath, item.NewPath); err == nil {
-				restored++
-			}
-		}
-		
-		delete(state.undoRecords, undoID)
-		dialog.ShowInformation("完成", fmt.Sprintf("成功恢复 %d 个文件", restored), w)
-		
-		// 重新扫描
-		if len(state.files) > 0 {
-			scanFiles(filepath.Dir(state.files[0].Path), state, w)
-		}
-	}, w)
-	confirm.Show()
 }
 
 func fileExists(path string) bool {
