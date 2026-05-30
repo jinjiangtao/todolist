@@ -23,7 +23,7 @@ type FileInfo struct {
 }
 
 type Rule struct {
-	Type     string // "sequence", "replace", "date", "case", "extension"
+	Type     string
 	Enabled  bool
 	Sequence struct {
 		Start  int
@@ -46,8 +46,8 @@ type Rule struct {
 		Mode string
 	}
 	Extension struct {
-		NewExt    string
-		UnifyCase bool
+		NewExt     string
+		UnifyCase  bool
 		TargetCase string
 	}
 }
@@ -385,7 +385,6 @@ func previewRename() {
 	println(fmt.Sprintf("%-30s %-30s %-10s", "原文件名", "新文件名", "状态"))
 	println("----------------------------------------------------------------------")
 
-	conflictCount := 0
 	for _, file := range files {
 		status := "不变"
 		if file.NewName != file.Name+file.Ext {
