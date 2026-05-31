@@ -11,27 +11,43 @@
         <div class="meta">
           <span>{{ formatDate(article.created_at) }}</span>
           <span>阅读：{{ article.view_count }}</span>
+          <span v-if="article.category">分类：{{ article.category.name }}</span>
         </div>
-        <div class="content" v-html="renderedContent"></div>
+        <div v-if="article.tags && article.tags.length" class="tags">
+          <el-tag v-for="tag in article.tags" :key="tag.id" size="small" style="margin-right: 8px">{{ tag.name }}</el-tag>
+        </div>
+        <div class="content" v-html="safeHtml" ref="contentRef"></div>
       </div>
     </div>
+
+    <!-- 图片查看器 -->
+    <el-image-viewer
+      v-if="imageViewerVisible"
+      :url-list="imageUrls"
+      :initial-index="currentImageIndex"
+      @close="imageViewerVisible = false"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import request from '@/utils/request'
 
 const route = useRoute()
 const router = useRouter()
 const article = ref(null)
 const loading = ref(true)
+const contentRef = ref(null)
+const imageViewerVisible = ref(false)
+const imageUrls = ref([])
+const currentImageIndex = ref(0)
 
-const renderedContent = computed(() => {
+const safeHtml = computed(() => {
   if (!article.value) return ''
-  return marked(article.value.content || '')
+  return DOMPurify.sanitize(article.value.content || '')
 })
 
 async function fetchArticle() {
@@ -39,9 +55,33 @@ async function fetchArticle() {
   try {
     const res = await request.get(`/articles/${route.params.id}`)
     article.value = res.data
+    await nextTick()
+    setupImageClickHandler()
   } finally {
     loading.value = false
   }
+}
+
+function setupImageClickHandler() {
+  if (!contentRef.value) return
+  const images = contentRef.value.querySelectorAll('img')
+  imageUrls.value = Array.from(images).map(img => img.src)
+  
+  images.forEach((img, index) => {
+    img.style.cursor = 'pointer'
+    img.style.maxWidth = '100%'
+    img.style.height = 'auto'
+    img.addEventListener('click', () => {
+      currentImageIndex.value = index
+      imageViewerVisible.value = true
+    })
+  })
+
+  const videos = contentRef.value.querySelectorAll('video')
+  videos.forEach(video => {
+    video.style.maxWidth = '100%'
+    video.controls = true
+  })
 }
 
 function formatDate(dateStr) {
@@ -102,9 +142,13 @@ onMounted(() => {
 .meta {
   font-size: 14px;
   color: #999;
-  margin-bottom: 32px;
+  margin-bottom: 16px;
   display: flex;
   gap: 20px;
+}
+
+.tags {
+  margin-bottom: 32px;
 }
 
 .content {
@@ -146,5 +190,45 @@ onMounted(() => {
 .content :deep(pre code) {
   background: none;
   padding: 0;
+}
+
+.content :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 16px 0;
+}
+
+.content :deep(video) {
+  max-width: 100%;
+  border-radius: 4px;
+  margin: 16px 0;
+}
+
+.content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+}
+
+.content :deep(th),
+.content :deep(td) {
+  border: 1px solid #ddd;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.content :deep(th) {
+  background: #f5f5f5;
+}
+
+.content :deep(blockquote) {
+  border-left: 4px solid #409eff;
+  padding-left: 16px;
+  margin: 16px 0;
+  color: #666;
+  background: #f9f9f9;
+  padding: 16px;
+  border-radius: 0 4px 4px 0;
 }
 </style>

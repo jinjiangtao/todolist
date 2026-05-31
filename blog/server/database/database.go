@@ -18,7 +18,7 @@ func InitDB() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
-	DB.AutoMigrate(&models.User{}, &models.Article{})
+	DB.AutoMigrate(&models.User{}, &models.Article{}, &models.Category{}, &models.Tag{})
 
 	initDefaultAdmin()
 }

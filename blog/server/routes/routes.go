@@ -18,12 +18,16 @@ func SetupRoutes(r *gin.Engine) {
 		c.Next()
 	})
 
+	r.Static("/uploads", "./uploads")
+
 	api := r.Group("/api/v1")
 	{
 		api.POST("/login", controllers.Login)
 
 		api.GET("/articles", controllers.GetPublishedArticles)
 		api.GET("/articles/:id", controllers.GetArticle)
+		api.GET("/categories", controllers.GetCategories)
+		api.GET("/tags", controllers.GetTags)
 
 		admin := api.Group("/admin")
 		admin.Use(middleware.AuthMiddleware())
@@ -33,6 +37,16 @@ func SetupRoutes(r *gin.Engine) {
 			admin.PUT("/articles/:id", controllers.UpdateArticle)
 			admin.DELETE("/articles/:id", controllers.DeleteArticle)
 			admin.PUT("/password", controllers.ChangePassword)
+
+			admin.POST("/upload", controllers.UploadFile)
+
+			admin.GET("/categories", controllers.GetCategories)
+			admin.POST("/categories", controllers.CreateCategory)
+			admin.DELETE("/categories/:id", controllers.DeleteCategory)
+
+			admin.GET("/tags", controllers.GetTags)
+			admin.POST("/tags", controllers.CreateTag)
+			admin.DELETE("/tags/:id", controllers.DeleteTag)
 		}
 	}
 }
