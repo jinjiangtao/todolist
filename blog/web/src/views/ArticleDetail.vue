@@ -45,9 +45,15 @@ const imageViewerVisible = ref(false)
 const imageUrls = ref([])
 const currentImageIndex = ref(0)
 
+// 配置DOMPurify允许必要的标签和属性
+const DOMPURIFY_CONFIG = {
+  ALLOWED_TAGS: ['img', 'p', 'br', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'strong', 'em', 'a', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'div', 'video', 'source'],
+  ALLOWED_ATTR: ['src', 'href', 'class', 'style', 'id', 'target', 'controls', 'type', 'width', 'height', 'alt', 'title', 'data-value']
+}
+
 const safeHtml = computed(() => {
   if (!article.value) return ''
-  return DOMPurify.sanitize(article.value.content || '')
+  return DOMPurify.sanitize(article.value.content || '', DOMPURIFY_CONFIG)
 })
 
 async function fetchArticle() {

@@ -130,8 +130,14 @@ const rules = {
   title: [{ required: true, message: '请输入标题', trigger: 'blur' }]
 }
 
+// 配置DOMPurify允许必要的img属性
+const DOMPURIFY_CONFIG = {
+  ALLOWED_TAGS: ['img', 'p', 'br', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'strong', 'em', 'a', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'div', 'video', 'source'],
+  ALLOWED_ATTR: ['src', 'href', 'class', 'style', 'id', 'target', 'controls', 'type', 'width', 'height', 'alt', 'title', 'data-value']
+}
+
 const safeHtml = computed(() => {
-  return DOMPurify.sanitize(form.value.content || '')
+  return DOMPurify.sanitize(form.value.content || '', DOMPURIFY_CONFIG)
 })
 
 const toolbarConfig = {}
@@ -147,7 +153,9 @@ async function customUploadImage(file, insertFn) {
         'Authorization': `Bearer ${authStore.token}`
       }
     })
-    insertFn(res.data.data.url)
+    // 使用完整URL确保图片可以正常显示
+    const fullUrl = `http://localhost:8080${res.data.data.url}`
+    insertFn(fullUrl)
   } catch (err) {
     ElMessage.error('图片上传失败')
     console.error(err)
@@ -165,7 +173,9 @@ async function customUploadVideo(file, insertFn) {
         'Authorization': `Bearer ${authStore.token}`
       }
     })
-    insertFn(res.data.data.url)
+    // 使用完整URL确保视频可以正常显示
+    const fullUrl = `http://localhost:8080${res.data.data.url}`
+    insertFn(fullUrl)
   } catch (err) {
     ElMessage.error('视频上传失败')
     console.error(err)
