@@ -15,12 +15,23 @@
             class="article-item"
             @click="goToDetail(article.id)"
           >
-            <h2 class="title">{{ article.title }}</h2>
-            <div class="meta">
-              <span>{{ formatDate(article.created_at) }}</span>
-              <span>阅读：{{ article.view_count }}</span>
+            <div class="article-content">
+              <div v-if="getFirstImage(article.content)" class="thumbnail">
+                <img :src="getFirstImage(article.content)" alt="文章缩略图" />
+              </div>
+              <div class="text-content">
+                <h2 class="title">{{ article.title }}</h2>
+                <div class="meta">
+                  <span>{{ formatDate(article.created_at) }}</span>
+                  <span>阅读：{{ article.view_count }}</span>
+                  <span v-if="article.category">分类：{{ article.category.name }}</span>
+                </div>
+                <p class="summary">{{ getSummary(article.content) }}</p>
+                <div v-if="article.tags && article.tags.length" class="tags">
+                  <el-tag v-for="tag in article.tags.slice(0, 3)" :key="tag.id" size="small">{{ tag.name }}</el-tag>
+                </div>
+              </div>
             </div>
-            <p class="summary">{{ getSummary(article.content) }}</p>
           </div>
         </div>
         <el-pagination
@@ -69,8 +80,21 @@ function formatDate(dateStr) {
   return date.toLocaleDateString('zh-CN')
 }
 
+function getFirstImage(content) {
+  if (!content) return null
+  const imgRegex = /<img[^>]+src="([^">]+)"/
+  const match = content.match(imgRegex)
+  return match ? match[1] : null
+}
+
+function removeHtmlTags(str) {
+  if (!str) return ''
+  return str.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ')
+}
+
 function getSummary(content) {
-  return content ? content.substring(0, 150) + (content.length > 150 ? '...' : '') : ''
+  const text = removeHtmlTags(content)
+  return text ? text.substring(0, 150) + (text.length > 150 ? '...' : '') : ''
 }
 
 function goToDetail(id) {
@@ -110,7 +134,7 @@ onMounted(() => {
 }
 
 .container {
-  max-width: 800px;
+  max-width: 900px;
   margin: 40px auto;
   padding: 0 20px;
 }
@@ -122,10 +146,15 @@ onMounted(() => {
   color: #999;
 }
 
+.article-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .article-item {
   background: white;
   padding: 24px;
-  margin-bottom: 16px;
   border-radius: 8px;
   cursor: pointer;
   transition: box-shadow 0.3s;
@@ -135,28 +164,81 @@ onMounted(() => {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
 }
 
+.article-content {
+  display: flex;
+  gap: 20px;
+}
+
+.thumbnail {
+  flex-shrink: 0;
+  width: 150px;
+  height: 100px;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.text-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
 .title {
   font-size: 20px;
   color: #333;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
 }
 
 .meta {
   font-size: 14px;
   color: #999;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   display: flex;
-  gap: 20px;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .summary {
   color: #666;
   line-height: 1.6;
+  flex: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.tags {
+  margin-top: 12px;
+  flex-shrink: 0;
+}
+
+.tags :deep(.el-tag) {
+  margin-right: 8px;
+  margin-bottom: 4px;
 }
 
 .pagination {
   display: flex;
   justify-content: center;
   margin-top: 40px;
+}
+
+@media (max-width: 600px) {
+  .article-content {
+    flex-direction: column;
+  }
+  
+  .thumbnail {
+    width: 100%;
+    height: 150px;
+  }
 }
 </style>
