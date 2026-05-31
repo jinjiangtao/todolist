@@ -1,0 +1,37 @@
+package database
+
+import (
+	"blog-server/models"
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"log"
+)
+
+var DB *gorm.DB
+
+func InitDB() {
+	var err error
+	DB, err = gorm.Open(sqlite.Open("blog.db"), &gorm.Config{})
+	if err != nil {
+		log.Fatal("Failed to connect to database:", err)
+	}
+
+	DB.AutoMigrate(&models.User{}, &models.Article{})
+
+	initDefaultAdmin()
+}
+
+func initDefaultAdmin() {
+	var user models.User
+	result := DB.Where("username = ?", "admin").First(&user)
+	if result.Error != nil {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
+		if err != nil {
+			log.Fatal("Failed to hash password:", err)
+		}
+		admin := models.User{Username: "admin", Password: string(hashedPassword)}
+		DB.Create(&admin)
+		log.Println("Default admin account created: admin/123456")
+	}
+}
