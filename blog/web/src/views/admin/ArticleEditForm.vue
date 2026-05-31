@@ -71,8 +71,35 @@
 </template>
 
 <script setup>
-import { ref, defineProps, defineEmits } from 'vue'
+import { ref } from 'vue'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
+
+const props = defineProps({
+  form: {
+    type: Object,
+    required: true
+  },
+  rules: {
+    type: Object,
+    required: true
+  },
+  categories: {
+    type: Array,
+    required: true
+  },
+  tags: {
+    type: Array,
+    required: true
+  },
+  editorConfig: {
+    type: Object,
+    required: true
+  },
+  toolbarConfig: {
+    type: Object,
+    required: true
+  }
+})
 
 const emit = defineEmits(['editor-created'])
 

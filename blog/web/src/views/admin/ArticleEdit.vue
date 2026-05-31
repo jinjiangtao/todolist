@@ -73,7 +73,7 @@ import ArticleHistory from './ArticleHistory.vue'
 
 const route = useRoute()
 const router = useRouter()
-const formRef = ref(null)
+const articleFormRef = ref(null)
 const loading = ref(false)
 const editorRef = ref()
 const previewVisible = ref(false)
