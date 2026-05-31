@@ -6,6 +6,7 @@ import (
 	"blog-server/utils"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"log"
 	"net/http"
 )
 
@@ -19,9 +20,12 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	log.Printf("Login request: username=%s", req.Username)
+
 	var user models.User
 	result := database.DB.Where("username = ?", req.Username).First(&user)
 	if result.Error != nil {
+		log.Printf("User not found: %v", result.Error)
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
 			"message": "用户名或密码错误",
@@ -29,8 +33,11 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	log.Printf("User found: %s, password hash length: %d", user.Username, len(user.Password))
+
 	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
 	if err != nil {
+		log.Printf("Password verification failed: %v", err)
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
 			"message": "用户名或密码错误",

@@ -3,9 +3,10 @@ package database
 import (
 	"blog-server/models"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"log"
+
+	sqlite "github.com/glebarez/sqlite"
 )
 
 var DB *gorm.DB
@@ -33,5 +34,9 @@ func initDefaultAdmin() {
 		admin := models.User{Username: "admin", Password: string(hashedPassword)}
 		DB.Create(&admin)
 		log.Println("Default admin account created: admin/123456")
+		log.Printf("Password hash: %s (length: %d)", string(hashedPassword), len(string(hashedPassword)))
+	} else {
+		log.Println("Admin account already exists")
+		log.Printf("Existing password hash length: %d", len(user.Password))
 	}
 }
