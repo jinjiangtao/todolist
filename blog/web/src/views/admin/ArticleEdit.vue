@@ -100,6 +100,8 @@ import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import * as wangEditor from '@wangeditor/editor'
 import DOMPurify from 'dompurify'
 import request from '@/utils/request'
+import { useAuthStore } from '@/store/auth'
+import axios from 'axios'
 
 const route = useRoute()
 const router = useRouter()
@@ -109,6 +111,7 @@ const editorRef = ref()
 const previewVisible = ref(false)
 const categories = ref([])
 const tags = ref([])
+const authStore = useAuthStore()
 
 const isEdit = computed(() => !!route.params.id)
 
@@ -133,28 +136,56 @@ const safeHtml = computed(() => {
 
 const toolbarConfig = {}
 
+// 自定义上传图片函数
+async function customUploadImage(file, insertFn) {
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  try {
+    const res = await axios.post('http://localhost:8080/api/v1/admin/upload', formData, {
+      headers: {
+        'Authorization': `Bearer ${authStore.token}`
+      }
+    })
+    insertFn(res.data.data.url)
+  } catch (err) {
+    ElMessage.error('图片上传失败')
+    console.error(err)
+  }
+}
+
+// 自定义上传视频函数
+async function customUploadVideo(file, insertFn) {
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  try {
+    const res = await axios.post('http://localhost:8080/api/v1/admin/upload', formData, {
+      headers: {
+        'Authorization': `Bearer ${authStore.token}`
+      }
+    })
+    insertFn(res.data.data.url)
+  } catch (err) {
+    ElMessage.error('视频上传失败')
+    console.error(err)
+  }
+}
+
 const editorConfig = {
   placeholder: '请输入内容...',
   MENU_CONF: {
     uploadImage: {
-      server: 'http://localhost:8080/api/v1/admin/upload',
+      customUpload: customUploadImage,
       fieldName: 'file',
       maxFileSize: 10 * 1024 * 1024,
-      allowedFileTypes: ['image/*'],
-      metaWithUrl: true,
-      customInsert(res, insertFn) {
-        insertFn(res.data.url)
-      }
+      allowedFileTypes: ['image/*']
     },
     uploadVideo: {
-      server: 'http://localhost:8080/api/v1/admin/upload',
+      customUpload: customUploadVideo,
       fieldName: 'file',
       maxFileSize: 100 * 1024 * 1024,
-      allowedFileTypes: ['video/*'],
-      metaWithUrl: true,
-      customInsert(res, insertFn) {
-        insertFn(res.data.url)
-      }
+      allowedFileTypes: ['video/*']
     }
   }
 }

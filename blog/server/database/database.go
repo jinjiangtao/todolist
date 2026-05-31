@@ -21,6 +21,7 @@ func InitDB() {
 	DB.AutoMigrate(&models.User{}, &models.Article{}, &models.Category{}, &models.Tag{})
 
 	initDefaultAdmin()
+	initDefaultData()
 }
 
 func initDefaultAdmin() {
@@ -38,5 +39,37 @@ func initDefaultAdmin() {
 	} else {
 		log.Println("Admin account already exists")
 		log.Printf("Existing password hash length: %d", len(user.Password))
+	}
+}
+
+func initDefaultData() {
+	// 初始化默认分类
+	var categoryCount int64
+	DB.Model(&models.Category{}).Count(&categoryCount)
+	if categoryCount == 0 {
+		categories := []models.Category{
+			{Name: "技术"},
+			{Name: "生活"},
+			{Name: "随笔"},
+			{Name: "教程"},
+		}
+		DB.Create(&categories)
+		log.Println("Default categories created")
+	}
+
+	// 初始化默认标签
+	var tagCount int64
+	DB.Model(&models.Tag{}).Count(&tagCount)
+	if tagCount == 0 {
+		tags := []models.Tag{
+			{Name: "Go"},
+			{Name: "Vue"},
+			{Name: "JavaScript"},
+			{Name: "编程"},
+			{Name: "学习"},
+			{Name: "分享"},
+		}
+		DB.Create(&tags)
+		log.Println("Default tags created")
 	}
 }
