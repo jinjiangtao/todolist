@@ -44,6 +44,11 @@ func SetupRoutes(r *gin.Engine) {
 			admin.DELETE("/articles/:id", controllers.DeleteArticle)
 			admin.PUT("/password", controllers.ChangePassword)
 
+			admin.GET("/articles/:id/histories", controllers.GetArticleHistories)
+			admin.GET("/articles/:id/histories/:hid", controllers.GetArticleHistory)
+			admin.POST("/articles/:id/histories/:hid/restore", controllers.RestoreArticleHistory)
+			admin.DELETE("/articles/:id/histories/:hid", controllers.DeleteArticleHistory)
+
 			admin.POST("/upload", controllers.UploadFile)
 
 			admin.GET("/categories", controllers.GetCategories)

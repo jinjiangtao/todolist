@@ -20,6 +20,11 @@
       </div>
     </div>
 
+    <!-- 评论区域 -->
+    <div class="container">
+      <Comment :articleId="route.params.id" />
+    </div>
+
     <!-- 图片查看器 -->
     <el-image-viewer
       v-if="imageViewerVisible"
@@ -35,6 +40,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DOMPurify from 'dompurify'
 import request from '@/utils/request'
+import Comment from './Comment.vue'
 
 const route = useRoute()
 const router = useRouter()

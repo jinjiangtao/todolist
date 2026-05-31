@@ -106,6 +106,84 @@
             </el-table-column>
           </el-table>
         </el-tab-pane>
+
+        <!-- 评论管理 -->
+        <el-tab-pane label="评论管理" name="comments">
+          <div class="toolbar">
+            <el-select v-model="commentFilter.status" placeholder="按状态筛选" style="width: 150px; margin-right: 10px" clearable>
+              <el-option label="待审核" :value="0" />
+              <el-option label="已发布" :value="1" />
+              <el-option label="已删除" :value="2" />
+            </el-select>
+            <el-select v-model="commentFilter.article_id" placeholder="按文章筛选" style="width: 200px; margin-right: 10px" clearable filterable>
+              <el-option
+                v-for="article in articles"
+                :key="article.id"
+                :label="article.title"
+                :value="article.id"
+              />
+            </el-select>
+            <el-button @click="fetchComments">筛选</el-button>
+            <el-button type="danger" :disabled="!selectedComments.length" @click="handleBatchDelete" style="margin-left: auto">
+              批量删除 ({{ selectedComments.length }})
+            </el-button>
+          </div>
+          <div v-if="loadingComments" class="loading">加载中...</div>
+          <div v-else>
+            <el-table :data="comments" stripe style="margin-top: 20px" @selection-change="handleSelectionChange">
+              <el-table-column type="selection" width="55" />
+              <el-table-column prop="id" label="ID" width="80" />
+              <el-table-column label="文章" width="200">
+                <template #default="{ row }">
+                  {{ row.article ? row.article.title : '-' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="评论者" width="150">
+                <template #default="{ row }">
+                  <div>{{ row.author_name }}</div>
+                  <div style="font-size: 12px; color: #999">{{ row.author_email }}</div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="content" label="内容" min-width="200">
+                <template #default="{ row }">
+                  <div style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    {{ row.content }}
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="likes" label="点赞" width="80" />
+              <el-table-column prop="author_ip" label="IP" width="120" />
+              <el-table-column prop="status" label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="getStatusType(row.status)">
+                    {{ getStatusText(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="created_at" label="时间" width="180">
+                <template #default="{ row }">
+                  {{ formatDate(row.created_at) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <el-button v-if="row.status === 0" type="success" size="small" @click="handleApprove(row.id)">通过</el-button>
+                  <el-button v-if="row.status === 0" type="warning" size="small" @click="handleReject(row.id)">驳回</el-button>
+                  <el-button type="danger" size="small" @click="handleDeleteComment(row.id)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-pagination
+              v-if="commentTotalPage > 1"
+              v-model:current-page="commentPage"
+              :page-size="commentPageSize"
+              :total="commentTotal"
+              layout="prev, pager, next"
+              @current-change="fetchComments"
+              class="pagination"
+            />
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </div>
   </div>
@@ -131,6 +209,17 @@ const total = ref(0)
 const totalPage = ref(0)
 const newCategory = ref('')
 const newTag = ref('')
+const comments = ref([])
+const loadingComments = ref(false)
+const commentPage = ref(1)
+const commentPageSize = ref(10)
+const commentTotal = ref(0)
+const commentTotalPage = ref(0)
+const selectedComments = ref([])
+const commentFilter = ref({
+  status: '',
+  article_id: ''
+})
 
 async function fetchArticles() {
   loading.value = true
@@ -251,7 +340,103 @@ onMounted(() => {
   fetchArticles()
   fetchCategories()
   fetchTags()
+  fetchComments()
 })
+
+async function fetchComments() {
+  loadingComments.value = true
+  try {
+    const params = {
+      page: commentPage.value,
+      page_size: commentPageSize.value
+    }
+    if (commentFilter.value.status !== '') {
+      params.status = commentFilter.value.status
+    }
+    if (commentFilter.value.article_id) {
+      params.article_id = commentFilter.value.article_id
+    }
+    
+    const res = await request.get('/admin/comments', { params })
+    comments.value = res.data.list
+    commentTotal.value = res.data.total
+    commentTotalPage.value = res.data.total_page
+  } finally {
+    loadingComments.value = false
+  }
+}
+
+function getStatusText(status) {
+  const statusMap = {
+    0: '待审核',
+    1: '已发布',
+    2: '已删除'
+  }
+  return statusMap[status] || '未知'
+}
+
+function getStatusType(status) {
+  const typeMap = {
+    0: 'warning',
+    1: 'success',
+    2: 'info'
+  }
+  return typeMap[status] || 'info'
+}
+
+function handleSelectionChange(selection) {
+  selectedComments.value = selection
+}
+
+async function handleApprove(id) {
+  await request.put(`/admin/comments/${id}/status`, { status: 1 })
+  ElMessage.success('评论已通过')
+  fetchComments()
+}
+
+async function handleReject(id) {
+  await request.put(`/admin/comments/${id}/status`, { status: 2 })
+  ElMessage.success('评论已驳回')
+  fetchComments()
+}
+
+async function handleDeleteComment(id) {
+  try {
+    await ElMessageBox.confirm('确定要删除这条评论吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await request.delete(`/admin/comments/${id}`)
+    ElMessage.success('删除成功')
+    fetchComments()
+  } catch (error) {
+    if (error !== 'cancel') {
+      throw error
+    }
+  }
+}
+
+async function handleBatchDelete() {
+  if (!selectedComments.value.length) return
+  
+  try {
+    await ElMessageBox.confirm(`确定要删除选中的 ${selectedComments.value.length} 条评论吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    const ids = selectedComments.value.map(c => c.id)
+    await request.post('/admin/comments/batch-delete', { ids })
+    ElMessage.success('批量删除成功')
+    selectedComments.value = []
+    fetchComments()
+  } catch (error) {
+    if (error !== 'cancel') {
+      throw error
+    }
+  }
+}
 </script>
 
 <style scoped>

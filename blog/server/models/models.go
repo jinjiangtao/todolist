@@ -34,22 +34,33 @@ type Tag struct {
 }
 
 type Article struct {
-	ID           uint           `json:"id" gorm:"primaryKey"`
-	Title        string         `json:"title" gorm:"size:200;not null"`
-	Content      string         `json:"content" gorm:"type:text"`
-	Status       int            `json:"status" gorm:"default:0"` // 0: draft, 1: published
-	ViewCount    int            `json:"view_count" gorm:"default:0"`
-	CommentCount int            `json:"comment_count" gorm:"default:0"`
-	IsTop        bool           `json:"is_top" gorm:"default:false"`
-	Password     string         `json:"-" gorm:"size:255"`
-	PublishedAt  *time.Time     `json:"published_at"`
-	CategoryID   *uint          `json:"category_id"`
-	Category     *Category      `json:"category,omitempty" gorm:"foreignKey:CategoryID"`
-	Tags         []Tag          `json:"tags,omitempty" gorm:"many2many:article_tags"`
-	Comments     []Comment      `json:"comments,omitempty" gorm:"foreignKey:ArticleID"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index"`
+	ID           uint             `json:"id" gorm:"primaryKey"`
+	Title        string           `json:"title" gorm:"size:200;not null"`
+	Content      string           `json:"content" gorm:"type:text"`
+	Status       int              `json:"status" gorm:"default:0"` // 0: draft, 1: published
+	ViewCount    int              `json:"view_count" gorm:"default:0"`
+	CommentCount int              `json:"comment_count" gorm:"default:0"`
+	IsTop        bool             `json:"is_top" gorm:"default:false"`
+	Password     string           `json:"-" gorm:"size:255"`
+	PublishedAt  *time.Time       `json:"published_at"`
+	CategoryID   *uint            `json:"category_id"`
+	Category     *Category        `json:"category,omitempty" gorm:"foreignKey:CategoryID"`
+	Tags         []Tag            `json:"tags,omitempty" gorm:"many2many:article_tags"`
+	Comments     []Comment        `json:"comments,omitempty" gorm:"foreignKey:ArticleID"`
+	Histories    []ArticleHistory `json:"histories,omitempty" gorm:"foreignKey:ArticleID"`
+	CreatedAt    time.Time        `json:"created_at"`
+	UpdatedAt    time.Time        `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt   `json:"-" gorm:"index"`
+}
+
+type ArticleHistory struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	ArticleID uint      `json:"article_id" gorm:"not null;index"`
+	Article   *Article  `json:"article,omitempty" gorm:"foreignKey:ArticleID"`
+	Version   int       `json:"version" gorm:"not null"`
+	Title     string    `json:"title" gorm:"size:200;not null"`
+	Content   string    `json:"content" gorm:"type:text"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Comment struct {

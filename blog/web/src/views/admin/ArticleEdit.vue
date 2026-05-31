@@ -9,83 +9,49 @@
       </div>
     </div>
     <div class="container">
-      <el-form :model="form" :rules="rules" ref="formRef" label-width="80px">
-        <el-form-item label="标题" prop="title">
-          <el-input v-model="form.title" placeholder="请输入文章标题" />
-        </el-form-item>
+      <el-tabs v-if="isEdit" v-model="activeTab">
+        <el-tab-pane label="编辑文章" name="edit">
+          <ArticleForm
+            :form="form"
+            :rules="rules"
+            :categories="categories"
+            :tags="tags"
+            :form-ref="formRef"
+            :editor-config="editorConfig"
+            :toolbar-config="toolbarConfig"
+            @editor-created="handleCreated"
+          />
+          <el-form-item>
+            <el-button type="primary" :loading="loading" @click="handleSave">保存</el-button>
+            <el-button @click="goBack">取消</el-button>
+          </el-form-item>
+        </el-tab-pane>
+        <el-tab-pane label="历史版本" name="history">
+          <ArticleHistory
+            :article-id="route.params.id"
+            @restore="handleRestore"
+          />
+        </el-tab-pane>
+      </el-tabs>
 
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="分类">
-              <el-select v-model="form.category_id" placeholder="请选择分类" clearable style="width: 100%">
-                <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="标签">
-              <el-select v-model="form.tag_ids" multiple placeholder="请选择标签" style="width: 100%">
-                <el-option v-for="tag in tags" :key="tag.id" :label="tag.name" :value="tag.id" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="发布时间">
-              <el-date-picker
-                v-model="form.published_at"
-                type="datetime"
-                placeholder="选择发布时间"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="访问密码">
-              <el-input v-model="form.password" placeholder="留空则不需要密码" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-form-item>
-          <el-checkbox v-model="form.is_top">置顶文章</el-checkbox>
-        </el-form-item>
-
-        <el-form-item label="内容">
-          <div class="editor-container">
-            <Toolbar
-              :editor="editorRef"
-              :defaultConfig="toolbarConfig"
-              mode="default"
-              style="border-bottom: 1px solid #ccc"
-            />
-            <Editor
-              v-model="form.content"
-              :defaultConfig="editorConfig"
-              mode="default"
-              style="height: 500px; overflow-y: hidden"
-              @onCreated="handleCreated"
-            />
-          </div>
-        </el-form-item>
-
-        <el-form-item label="状态">
-          <el-radio-group v-model="form.status">
-            <el-radio :label="0">草稿</el-radio>
-            <el-radio :label="1">发布</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
+      <div v-else>
+        <ArticleForm
+          :form="form"
+          :rules="rules"
+          :categories="categories"
+          :tags="tags"
+          :form-ref="formRef"
+          :editor-config="editorConfig"
+          :toolbar-config="toolbarConfig"
+          @editor-created="handleCreated"
+        />
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="handleSave">保存</el-button>
           <el-button @click="goBack">取消</el-button>
         </el-form-item>
-      </el-form>
+      </div>
     </div>
 
-    <!-- 预览对话框 -->
     <el-dialog v-model="previewVisible" title="文章预览" width="80%" top="5vh">
       <div class="preview-content" v-html="safeHtml"></div>
     </el-dialog>
@@ -102,6 +68,8 @@ import DOMPurify from 'dompurify'
 import request from '@/utils/request'
 import { useAuthStore } from '@/store/auth'
 import axios from 'axios'
+import ArticleForm from './ArticleEditForm.vue'
+import ArticleHistory from './ArticleHistory.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -111,6 +79,7 @@ const editorRef = ref()
 const previewVisible = ref(false)
 const categories = ref([])
 const tags = ref([])
+const activeTab = ref('edit')
 const authStore = useAuthStore()
 
 const isEdit = computed(() => !!route.params.id)
@@ -130,7 +99,6 @@ const rules = {
   title: [{ required: true, message: '请输入标题', trigger: 'blur' }]
 }
 
-// 配置DOMPurify允许必要的img属性
 const DOMPURIFY_CONFIG = {
   ALLOWED_TAGS: ['img', 'p', 'br', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'strong', 'em', 'a', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'div', 'video', 'source'],
   ALLOWED_ATTR: ['src', 'href', 'class', 'style', 'id', 'target', 'controls', 'type', 'width', 'height', 'alt', 'title', 'data-value']
@@ -142,18 +110,16 @@ const safeHtml = computed(() => {
 
 const toolbarConfig = {}
 
-// 自定义上传图片函数
 async function customUploadImage(file, insertFn) {
   const formData = new FormData()
   formData.append('file', file)
-  
+
   try {
     const res = await axios.post('http://localhost:8080/api/v1/admin/upload', formData, {
       headers: {
         'Authorization': `Bearer ${authStore.token}`
       }
     })
-    // 使用完整URL确保图片可以正常显示
     const fullUrl = `http://localhost:8080${res.data.data.url}`
     insertFn(fullUrl)
   } catch (err) {
@@ -162,18 +128,16 @@ async function customUploadImage(file, insertFn) {
   }
 }
 
-// 自定义上传视频函数
 async function customUploadVideo(file, insertFn) {
   const formData = new FormData()
   formData.append('file', file)
-  
+
   try {
     const res = await axios.post('http://localhost:8080/api/v1/admin/upload', formData, {
       headers: {
         'Authorization': `Bearer ${authStore.token}`
       }
     })
-    // 使用完整URL确保视频可以正常显示
     const fullUrl = `http://localhost:8080${res.data.data.url}`
     insertFn(fullUrl)
   } catch (err) {
@@ -270,6 +234,12 @@ function handlePreview() {
 
 function goBack() {
   router.push('/admin')
+}
+
+function handleRestore(article) {
+  form.value.title = article.title
+  form.value.content = article.content
+  activeTab.value = 'edit'
 }
 
 onMounted(() => {

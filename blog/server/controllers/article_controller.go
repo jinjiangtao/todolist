@@ -4,13 +4,14 @@ import (
 	"blog-server/database"
 	"blog-server/models"
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"math"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func GetPublishedArticles(c *gin.Context) {
@@ -146,6 +147,19 @@ func UpdateArticle(c *gin.Context) {
 		return
 	}
 
+	titleChanged := article.Title != req.Title
+	contentChanged := article.Content != req.Content
+
+	if titleChanged || contentChanged {
+		if err := createArticleHistory(article.ID, article.Title, article.Content); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    500,
+				"message": "创建历史版本失败",
+			})
+			return
+		}
+	}
+
 	article.Title = req.Title
 	article.Content = req.Content
 	article.Status = req.Status
@@ -190,6 +204,7 @@ func DeleteArticle(c *gin.Context) {
 		return
 	}
 
+	database.DB.Where("article_id = ?", article.ID).Delete(&models.ArticleHistory{})
 	database.DB.Model(&article).Association("Tags").Clear()
 	database.DB.Delete(&article)
 
@@ -306,4 +321,136 @@ func DeleteTag(c *gin.Context) {
 		"code":    200,
 		"message": "删除成功",
 	})
+}
+
+func GetArticleHistories(c *gin.Context) {
+	articleID := c.Param("id")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	offset := (page - 1) * pageSize
+
+	var histories []models.ArticleHistory
+	var total int64
+
+	database.DB.Model(&models.ArticleHistory{}).Where("article_id = ?", articleID).Count(&total)
+	database.DB.Where("article_id = ?", articleID).Order("version DESC").Offset(offset).Limit(pageSize).Find(&histories)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "获取成功",
+		"data": gin.H{
+			"list":       histories,
+			"total":      total,
+			"page":       page,
+			"page_size":  pageSize,
+			"total_page": int(math.Ceil(float64(total) / float64(pageSize))),
+		},
+	})
+}
+
+func GetArticleHistory(c *gin.Context) {
+	articleID := c.Param("id")
+	historyID := c.Param("hid")
+
+	var history models.ArticleHistory
+	result := database.DB.Where("id = ? AND article_id = ?", historyID, articleID).First(&history)
+	if result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    404,
+			"message": "历史版本不存在",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "获取成功",
+		"data":    history,
+	})
+}
+
+func RestoreArticleHistory(c *gin.Context) {
+	articleID := c.Param("id")
+	historyID := c.Param("hid")
+
+	var article models.Article
+	result := database.DB.First(&article, articleID)
+	if result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    404,
+			"message": "文章不存在",
+		})
+		return
+	}
+
+	var history models.ArticleHistory
+	result = database.DB.Where("id = ? AND article_id = ?", historyID, articleID).First(&history)
+	if result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    404,
+			"message": "历史版本不存在",
+		})
+		return
+	}
+
+	article.Title = history.Title
+	article.Content = history.Content
+	database.DB.Save(&article)
+
+	database.DB.Preload("Category").Preload("Tags").First(&article, articleID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "恢复成功",
+		"data":    article,
+	})
+}
+
+func DeleteArticleHistory(c *gin.Context) {
+	articleID := c.Param("id")
+	historyID := c.Param("hid")
+
+	var history models.ArticleHistory
+	result := database.DB.Where("id = ? AND article_id = ?", historyID, articleID).First(&history)
+	if result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    404,
+			"message": "历史版本不存在",
+		})
+		return
+	}
+
+	database.DB.Delete(&history)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "删除成功",
+	})
+}
+
+func createArticleHistory(articleID uint, title, content string) error {
+	var count int64
+	database.DB.Model(&models.ArticleHistory{}).Where("article_id = ?", articleID).Count(&count)
+
+	history := models.ArticleHistory{
+		ArticleID: articleID,
+		Version:   int(count + 1),
+		Title:     title,
+		Content:   content,
+	}
+
+	if err := database.DB.Create(&history).Error; err != nil {
+		return err
+	}
+
+	const maxVersions = 20
+	if count+1 > maxVersions {
+		var histories []models.ArticleHistory
+		database.DB.Where("article_id = ?", articleID).Order("version ASC").Limit(int(count + 1 - maxVersions)).Find(&histories)
+		for _, h := range histories {
+			database.DB.Delete(&h)
+		}
+	}
+
+	return nil
 }
