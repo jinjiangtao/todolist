@@ -3,6 +3,7 @@ package routes
 import (
 	"blog-server/controllers"
 	"blog-server/middleware"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -26,8 +27,13 @@ func SetupRoutes(r *gin.Engine) {
 
 		api.GET("/articles", controllers.GetPublishedArticles)
 		api.GET("/articles/:id", controllers.GetArticle)
+		api.GET("/articles/:id/comments", controllers.GetArticleComments)
+		api.GET("/captcha", controllers.GenerateCaptcha)
 		api.GET("/categories", controllers.GetCategories)
 		api.GET("/tags", controllers.GetTags)
+
+		api.POST("/comments", controllers.CreateComment)
+		api.POST("/comments/:id/like", controllers.LikeComment)
 
 		admin := api.Group("/admin")
 		admin.Use(middleware.AuthMiddleware())
@@ -47,6 +53,14 @@ func SetupRoutes(r *gin.Engine) {
 			admin.GET("/tags", controllers.GetTags)
 			admin.POST("/tags", controllers.CreateTag)
 			admin.DELETE("/tags/:id", controllers.DeleteTag)
+
+			admin.GET("/comments", controllers.GetAdminComments)
+			admin.PUT("/comments/:id/status", controllers.UpdateCommentStatus)
+			admin.DELETE("/comments/:id", controllers.DeleteComment)
+			admin.POST("/comments/batch-delete", controllers.DeleteCommentsBatch)
+
+			admin.GET("/settings", controllers.GetSystemSettings)
+			admin.PUT("/settings", controllers.UpdateSystemSettings)
 		}
 	}
 }

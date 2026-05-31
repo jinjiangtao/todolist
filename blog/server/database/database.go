@@ -2,9 +2,10 @@ package database
 
 import (
 	"blog-server/models"
+	"log"
+
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
-	"log"
 
 	sqlite "github.com/glebarez/sqlite"
 )
@@ -18,7 +19,7 @@ func InitDB() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
-	DB.AutoMigrate(&models.User{}, &models.Article{}, &models.Category{}, &models.Tag{})
+	DB.AutoMigrate(&models.User{}, &models.Article{}, &models.Category{}, &models.Tag{}, &models.Comment{}, &models.CommentLike{}, &models.SystemSettings{})
 
 	initDefaultAdmin()
 	initDefaultData()
@@ -71,5 +72,17 @@ func initDefaultData() {
 		}
 		DB.Create(&tags)
 		log.Println("Default tags created")
+	}
+
+	// 初始化默认系统设置
+	var settingsCount int64
+	DB.Model(&models.SystemSettings{}).Count(&settingsCount)
+	if settingsCount == 0 {
+		settings := models.SystemSettings{
+			CommentModeration: true,
+			CaptchaEnabled:    true,
+		}
+		DB.Create(&settings)
+		log.Println("Default system settings created")
 	}
 }
