@@ -12,11 +12,11 @@
       <el-tabs v-if="isEdit" v-model="activeTab">
         <el-tab-pane label="编辑文章" name="edit">
           <ArticleForm
+            ref="articleFormRef"
             :form="form"
             :rules="rules"
             :categories="categories"
             :tags="tags"
-            :form-ref="formRef"
             :editor-config="editorConfig"
             :toolbar-config="toolbarConfig"
             @editor-created="handleCreated"
@@ -36,11 +36,11 @@
 
       <div v-else>
         <ArticleForm
+          ref="articleFormRef"
           :form="form"
           :rules="rules"
           :categories="categories"
           :tags="tags"
-          :form-ref="formRef"
           :editor-config="editorConfig"
           :toolbar-config="toolbarConfig"
           @editor-created="handleCreated"
@@ -197,8 +197,8 @@ async function fetchArticle() {
 }
 
 async function handleSave(publish = false) {
-  if (!formRef.value) return
-  await formRef.value.validate(async (valid) => {
+  if (!articleFormRef.value) return
+  await articleFormRef.value.formRef.validate(async (valid) => {
     if (valid) {
       loading.value = true
       try {
