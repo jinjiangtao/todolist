@@ -1,27 +1,21 @@
 package database
 
 import (
-	"fmt"
 	"log"
 	"todo-api/config"
+	"todo-api/models"
 
-	"gorm.io/driver/mysql"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	_ "modernc.org/sqlite"
 )
 
 var DB *gorm.DB
 
 func InitDB(cfg *config.Config) *gorm.DB {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		cfg.DBUser,
-		cfg.DBPassword,
-		cfg.DBHost,
-		cfg.DBPort,
-		cfg.DBName,
-	)
-
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: cfg.DBName}), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
@@ -29,6 +23,12 @@ func InitDB(cfg *config.Config) *gorm.DB {
 	}
 
 	DB = db
+
+	if err := db.AutoMigrate(&models.User{}, &models.Todo{}); err != nil {
+		log.Fatalf("Failed to migrate database: %v", err)
+	}
+
+	log.Println("Database connected and migrated successfully")
 	return db
 }
 

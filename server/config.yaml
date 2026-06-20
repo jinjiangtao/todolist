@@ -1,6 +1,2 @@
-db_host: 192.168.255.131
-db_port: "3306"
-db_user: root
-db_password: 123456
-db_name: todo_db
+db_name: todo.db
 server_port: "8080"
